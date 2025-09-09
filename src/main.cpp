@@ -1,124 +1,142 @@
-/* Heltec Automation Receive communication test example
+/* Heltec Automation LoRaWAN communication example
  *
  * Function:
- * 1. Receive the same frequency band lora signal program
- *
+ * 1. Upload node data to the server using the standard LoRaWAN protocol.
+ *  
  * Description:
- *
+ * 1. Communicate using LoRaWAN protocol.
+ * 
  * HelTec AutoMation, Chengdu, China
  * 成都惠利特自动化科技有限公司
  * www.heltec.org
  *
- * this project also realess in GitHub:
- * https://github.com/Heltec-Aaron-Lee/WiFi_Kit_series
  * */
 
 #include "LoRaWan_APP.h"
-#include "Arduino.h"
-#include <Wire.h>
-#include "HT_SSD1306Wire.h"
 
-#define RF_FREQUENCY 923E6 // Hz
+/* OTAA para*/
+uint8_t devEui[] = { 0x70, 0xB3, 0xD5, 0x7E, 0xD8, 0x00, 0x4B, 0x7A };
+uint8_t appEui[] = { 0x00, 0x00, 0x00, 0x83, 0x64, 0x33, 0xE8, 0x64 };
+uint8_t appKey[] = { 0xBC, 0xC5, 0xE2, 0xDB, 0x06, 0x41, 0xAF, 0xC5, 0xDC, 0x48, 0x7A, 0x8B, 0xA0, 0xAC, 0x53, 0x7E };
 
-#define TX_OUTPUT_POWER 14 // dBm
+/* ABP para*/
+uint8_t nwkSKey[] = { 0x15, 0xb1, 0xd0, 0xef, 0xa4, 0x63, 0xdf, 0xbe, 0x3d, 0x11, 0x18, 0x1e, 0x1e, 0xc7, 0xda,0x85 };
+uint8_t appSKey[] = { 0xd7, 0x2c, 0x78, 0x75, 0x8c, 0xdc, 0xca, 0xbf, 0x55, 0xee, 0x4a, 0x77, 0x8d, 0x16, 0xef,0x67 };
+uint32_t devAddr =  ( uint32_t )0x007e6ae1;
 
-#define LORA_BANDWIDTH 0        // [0: 125 kHz,
-                                //  1: 250 kHz,
-                                //  2: 500 kHz,
-                                //  3: Reserved]
-#define LORA_SPREADING_FACTOR 7 // [SF7..SF12]
-#define LORA_CODINGRATE 1       // [1: 4/5,
-                                //  2: 4/6,
-                                //  3: 4/7,
-                                //  4: 4/8]
-#define LORA_PREAMBLE_LENGTH 8  // Same for Tx and Rx
-#define LORA_SYMBOL_TIMEOUT 0   // Symbols
-#define LORA_FIX_LENGTH_PAYLOAD_ON false
-#define LORA_IQ_INVERSION_ON false
+/*LoraWan channelsmask, default channels 0-7*/ 
+uint16_t userChannelsMask[6]={ 0x00FF,0x0000,0x0000,0x0000,0x0000,0x0000 };
 
-#define RX_TIMEOUT_VALUE 1000
-#define BUFFER_SIZE 30 // Define the payload size here
+/*LoraWan region, select in arduino IDE tools*/
+LoRaMacRegion_t loraWanRegion = ACTIVE_REGION;
 
-char txpacket[BUFFER_SIZE];
-char rxpacket[BUFFER_SIZE];
+/*LoraWan Class, Class A and Class C are supported*/
+DeviceClass_t  loraWanClass = CLASS_A;
 
-static RadioEvents_t RadioEvents;
+/*the application data transmission duty cycle.  value in [ms].*/
+uint32_t appTxDutyCycle = 15000;
 
-int16_t txNumber;
+/*OTAA or ABP*/
+bool overTheAirActivation = true;
 
-int16_t rssi, rxSize;
+/*ADR enable*/
+bool loraWanAdr = true;
 
-bool lora_idle = true;
-void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr);
+/* Indicates if the node is sending confirmed or unconfirmed messages */
+bool isTxConfirmed = true;
 
-SSD1306Wire factory_display(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_128_64, RST_OLED); // addr , freq , i2c group , resolution , rst
+/* Application port */
+uint8_t appPort = 2;
+/*!
+* Number of trials to transmit the frame, if the LoRaMAC layer did not
+* receive an acknowledgment. The MAC performs a datarate adaptation,
+* according to the LoRaWAN Specification V1.0.2, chapter 18.4, according
+* to the following table:
+*
+* Transmission nb | Data Rate
+* ----------------|-----------
+* 1 (first)       | DR
+* 2               | DR
+* 3               | max(DR-1,0)
+* 4               | max(DR-1,0)
+* 5               | max(DR-2,0)
+* 6               | max(DR-2,0)
+* 7               | max(DR-3,0)
+* 8               | max(DR-3,0)
+*
+* Note, that if NbTrials is set to 1 or 2, the MAC will not decrease
+* the datarate, in case the LoRaMAC layer did not receive an acknowledgment
+*/
+uint8_t confirmedNbTrials = 4;
 
-void VextON(void)
+/* Prepares the payload of the frame */
+static void prepareTxFrame( uint8_t port )
 {
-  pinMode(Vext, OUTPUT);
-  digitalWrite(Vext, LOW);
+  /*appData size is LORAWAN_APP_DATA_MAX_SIZE which is defined in "commissioning.h".
+  *appDataSize max value is LORAWAN_APP_DATA_MAX_SIZE.
+  *if enabled AT, don't modify LORAWAN_APP_DATA_MAX_SIZE, it may cause system hanging or failure.
+  *if disabled AT, LORAWAN_APP_DATA_MAX_SIZE can be modified, the max value is reference to lorawan region and SF.
+  *for example, if use REGION_CN470, 
+  *the max value for different DR can be found in MaxPayloadOfDatarateCN470 refer to DataratesCN470 and BandwidthsCN470 in "RegionCN470.h".
+  */
+    appDataSize = 4;
+    appData[0] = 0x00;
+    appData[1] = 0x01;
+    appData[2] = 0x02;
+    appData[3] = 0x03;
 }
 
-void VextOFF(void) // Vext default OFF
-{
-  pinMode(Vext, OUTPUT);
-  digitalWrite(Vext, HIGH);
-}
+//if true, next uplink will add MOTE_MAC_DEVICE_TIME_REQ 
 
-void setup()
-{
+
+void setup() {
   Serial.begin(115200);
-  Mcu.begin(HELTEC_BOARD, SLOW_CLK_TPYE);
-  VextON();
-
-  txNumber = 0;
-  rssi = 0;
-  factory_display.init();
-  factory_display.clear();
-  factory_display.display();
-
-  pinMode(LED, OUTPUT);
-  digitalWrite(LED, LOW);
-
-  RadioEvents.RxDone = OnRxDone;
-  Radio.Init(&RadioEvents);
-  Radio.SetChannel(RF_FREQUENCY);
-  Radio.SetRxConfig(MODEM_LORA, LORA_BANDWIDTH, LORA_SPREADING_FACTOR,
-                    LORA_CODINGRATE, 0, LORA_PREAMBLE_LENGTH,
-                    LORA_SYMBOL_TIMEOUT, LORA_FIX_LENGTH_PAYLOAD_ON,
-                    0, true, 0, 0, LORA_IQ_INVERSION_ON, true);
+  Mcu.begin(HELTEC_BOARD,SLOW_CLK_TPYE);
 }
 
 void loop()
 {
-  if (lora_idle)
+  switch( deviceState )
   {
-    lora_idle = false;
-    Serial.println("into RX mode");
-    Radio.Rx(0);
+    case DEVICE_STATE_INIT:
+    {
+#if(LORAWAN_DEVEUI_AUTO)
+      LoRaWAN.generateDeveuiByChipID();
+#endif
+      LoRaWAN.init(loraWanClass,loraWanRegion);
+      //both set join DR and DR when ADR off 
+      LoRaWAN.setDefaultDR(3);
+      break;
+    }
+    case DEVICE_STATE_JOIN:
+    {
+      LoRaWAN.join();
+      break;
+    }
+    case DEVICE_STATE_SEND:
+    {
+      prepareTxFrame( appPort );
+      LoRaWAN.send();
+      deviceState = DEVICE_STATE_CYCLE;
+      break;
+    }
+    case DEVICE_STATE_CYCLE:
+    {
+      // Schedule next packet transmission
+      txDutyCycleTime = appTxDutyCycle + randr( -APP_TX_DUTYCYCLE_RND, APP_TX_DUTYCYCLE_RND );
+      LoRaWAN.cycle(txDutyCycleTime);
+      deviceState = DEVICE_STATE_SLEEP;
+      break;
+    }
+    case DEVICE_STATE_SLEEP:
+    {
+      LoRaWAN.sleep(loraWanClass);
+      break;
+    }
+    default:
+    {
+      deviceState = DEVICE_STATE_INIT;
+      break;
+    }
   }
-  Radio.IrqProcess();
-}
-
-void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
-{
-  rssi = rssi;
-  rxSize = size;
-  memcpy(rxpacket, payload, size);
-  rxpacket[size] = '\0';
-  Radio.Sleep();
-  Serial.printf("\r\nreceived packet \"%s\" with rssi %d , length %d\r\n", rxpacket, rssi, rxSize);
-  factory_display.clear();
-  factory_display.display();
-  factory_display.setFont(ArialMT_Plain_10);
-  factory_display.setTextAlignment(TEXT_ALIGN_CENTER);
-  factory_display.drawString(64, 0, "CUMBUSTER69");
-  factory_display.setTextAlignment(TEXT_ALIGN_LEFT);
-  factory_display.drawString(0, 10, "DISTANCE:");
-  factory_display.setTextAlignment(TEXT_ALIGN_LEFT);
-  // factory_display.drawString(0, 10, "Sensor One");
-  factory_display.setTextAlignment(TEXT_ALIGN_RIGHT);
-  factory_display.drawString(128, 10, rxpacket);
-  factory_display.display();
-  lora_idle = true;
 }
