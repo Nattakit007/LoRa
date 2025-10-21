@@ -3,16 +3,53 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <HardwareSerial.h>
-#include "menu_system.h"
-#define Trig_PIN 47
-#define Echo_PIN 48
+#include <EEPROM.h>
+#include <Wire.h>
+#include "HT_SSD1306Wire.h"
+#define menuCount 4
 
+// --- Constants ---
+#define ADJUSTABLE_MENU_ITEMS 4 // Number of items that have a value to adjust
+#define TOTAL_MENU_ITEMS 5      // Total number of items including "Save and Exit"
+
+// --- Function Prototypes ---
+void handleInputs();
+void updateDisplay();
+void drawHomeScreen(float distance, const String &status);
+void drawMainMenu();
+void drawAdjustValue();
+float getValue(int index);
+// void readUltrasonicCM();
+bool oledstate = true;
+// --- Global Variables & Objects ---
+SSD1306Wire oled(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_128_64, RST_OLED);
+
+// Menu state variables
+int currentPage = 0;     // 0=Home, 1=Menu, 2=Adjust
+int menuIndex = 0;       // Currently highlighted menu item (0-4)
+int currentMenu = 0;     // The menu item selected for value adjustment
+bool needsRedraw = true; // Flag to redraw the screen only when needed
+
+// Menu items and their corresponding values
+String menuItems[TOTAL_MENU_ITEMS] = {"Drought Threshold", "Flood Threshold", "Tank Depth", "Sensor High", "Save and Exit"};
+float values[ADJUSTABLE_MENU_ITEMS] = {6.0, 6.0, 6.0, 6.0}; // Note: Size is ADJUSTABLE_MENU_ITEMS
+
+// --- Encoder Pins & Variables ---
+int pinA = 36; // CLK
+int pinB = 37; // DT
+int sw = 38;   // Switch
+int pinALast;
+int aVal;
+
+//-----------EEPROM SiZE---------------
+#define EEPROM_SIZE 8
+//-----------EEPROM Address---------------
+
+// Tank height in meters, adjust to your tank
 // ---------------- Encoder AND Oled ----------------
-
-
-
 // ========== Ultrasonic pins ==========
-
+#define Trig_PIN 46
+#define Echo_PIN 45
 // Ultrasonic reading function
 
 /* OTAA para*/
@@ -35,7 +72,7 @@ LoRaMacRegion_t loraWanRegion = ACTIVE_REGION;
 DeviceClass_t loraWanClass = CLASS_A;
 
 // the application data transmission duty cycle.  value in [ms]./
-uint32_t appTxDutyCycle = 60000;
+uint32_t appTxDutyCycle = 600000;
 
 // OTAA or ABP/
 bool overTheAirActivation = true;
@@ -68,9 +105,6 @@ uint8_t appPort = 2;
  * Note, that if NbTrials is set to 1 or 2, the MAC will not decrease
  * the datarate, in case the LoRaMAC layer did not receive an acknowledgment
  */
-uint8_t confirmedNbTrials = 4;
-
-/* User application data buffer size */
 
 int readUltrasonicCM()
 {
@@ -87,9 +121,11 @@ int readUltrasonicCM()
 
   // --- Echo pulse duration ---
   duration = pulseIn(Echo_PIN, HIGH); // timeout 30ms (~5m)
+  digitalWrite(3, 1);
 
   if (duration > 0)
   {
+    digitalWrite(3, 0);
     distanceCm = duration / 29 / 2; // µs → cm
   }
 
@@ -105,10 +141,211 @@ int readUltrasonicCM()
   }
 }
 
+//================Status==========================
+String statusss = "normal";
+void getstatus(float distance)
+{
+  if (distance < values[0])
+  {
+    statusss = "Drought";
+    // Turn off LED
+  }
+  else if (distance > values[1])
+  {
+    statusss = "Flood";
+  }
+  else
+  {
+    statusss = "Normal";
+  }
+}
+
+//==================EEPROM==========================
+void convertEEPROM()
+{
+  EEPROM.begin(EEPROM_SIZE);
+  float droughtThreshold = EEPROM.read(0);
+  float floodThreshold = EEPROM.read(2);
+  float tankDepth = EEPROM.read(4);
+  float sensorHeight = EEPROM.read(6);
+  // bool oledState = EEPROM.read(16);
+
+  values[0] = droughtThreshold * 0.01;
+  values[1] = floodThreshold * 0.01;
+  values[2] = tankDepth * 0.01;
+  values[3] = sensorHeight * 0.01;
+  // oledstate = oledState;
+  EEPROM.end();
+}
+//===================OLED==========================
+
+void WriteValue()
+{
+  EEPROM.begin(EEPROM_SIZE);
+
+  // Use EEPROM.put() to correctly store float variables
+  EEPROM.write(0, int(values[0] * 100));   // Address 0: Drought Threshold
+  EEPROM.write(2, int(values[1] * 100));   // Address 8: Tank Depth
+  EEPROM.write(4, int(values[2] * 100)); // Address 12: Sensor Height
+  EEPROM.write(6, int(values[3] * 100));   // Address 16: OLED State
+
+  EEPROM.commit();
+  EEPROM.end();
+}
+void handleInputs()
+{
+  // --- Handle Encoder Rotation ---
+  aVal = digitalRead(pinA);
+  if (aVal != pinALast)
+  {
+    bool clockwise = (digitalRead(pinB) != aVal);
+
+    if (currentPage == 1)
+    { // On the Main Menu -> scroll through items
+      menuIndex += clockwise ? 1 : -1;
+      if (menuIndex < 0)
+        menuIndex = TOTAL_MENU_ITEMS - 1;
+      if (menuIndex >= TOTAL_MENU_ITEMS)
+        menuIndex = 0;
+    }
+    else if (currentPage == 2)
+    { // On the Adjust screen -> change the value
+      values[currentMenu] += clockwise ? 0.1 : -0.1;
+      if (values[currentMenu] < 0)
+        values[currentMenu] = 0;
+    }
+    needsRedraw = true; // Flag that the screen needs an update
+  }
+  pinALast = aVal;
+
+  // --- Handle Button Press ---
+  if (digitalRead(sw) == LOW)
+  {
+    delay(200); // Simple debounce
+
+    switch (currentPage)
+    {
+    case 0: // From Home screen -> go to Menu
+      currentPage = 1;
+      break;
+    case 1: // From Menu screen -> check selection
+      // *** MODIFIED LOGIC HERE ***
+      if (menuIndex == TOTAL_MENU_ITEMS - 1)
+      {                    // If "Save and Exit" is selected
+        WriteValue();      // Save values to EEPROM
+        oledstate = false; // Go back to the Home screen
+        oled.displayOff();
+
+        // NOTE: If you were saving to EEPROM, you would add that code here.
+      }
+      else
+      {                          // If any other item is selected
+        currentMenu = menuIndex; // Lock in the item to adjust
+        currentPage = 2;         // Go to the Adjust Value screen
+      }
+      break;
+    case 2: // From Adjust screen -> go back to Home screen
+      currentPage = 0;
+      break;
+    }
+    needsRedraw = true; // Flag that the screen needs an update
+  }
+}
+
+/**
+ * @brief Central hub for drawing; selects which screen to draw based on currentPage.
+ */
+void updateDisplay()
+{
+  oled.clear();
+  switch (currentPage)
+  {
+  case 0:
+    getstatus(float(readUltrasonicCM()) * 0.01);
+    drawHomeScreen(readUltrasonicCM() * 0.01, statusss); // Using dummy values for now
+    break;
+  case 1:
+    drawMainMenu();
+    break;
+  case 2:
+    drawAdjustValue();
+    break;
+  }
+  oled.display();
+  needsRedraw = false; // Reset the flag after drawing
+}
+
+// --- Drawing Functions ---
+
+void drawHomeScreen(float distance, const String &status)
+{
+  oled.setFont(ArialMT_Plain_10);
+  oled.setTextAlignment(TEXT_ALIGN_CENTER);
+  oled.drawString(64, 0, "Live Water Status");
+
+  oled.setFont(ArialMT_Plain_16);
+  oled.setTextAlignment(TEXT_ALIGN_LEFT);
+  oled.drawString(10, 18, "Dist:");
+  oled.setTextAlignment(TEXT_ALIGN_RIGHT);
+  oled.drawString(118, 18, String(distance, 2) + " m");
+
+  oled.setFont(ArialMT_Plain_10);
+  oled.setTextAlignment(TEXT_ALIGN_LEFT);
+  oled.drawString(10, 36, "State:");
+  oled.setTextAlignment(TEXT_ALIGN_RIGHT);
+  oled.drawString(118, 36, status);
+
+  oled.setTextAlignment(TEXT_ALIGN_CENTER);
+  oled.drawString(64, 52, "Press to Edit");
+}
+
+void drawMainMenu()
+{
+  oled.setFont(ArialMT_Plain_10);
+  oled.setTextAlignment(TEXT_ALIGN_CENTER);
+  oled.drawString(64, 0, "Main Menu");
+
+  oled.setTextAlignment(TEXT_ALIGN_LEFT);
+  for (int i = 0; i < TOTAL_MENU_ITEMS; i++)
+  {
+    if (i == menuIndex)
+    {
+      oled.drawString(0, 12 + (i * 10), ">");
+    }
+    oled.drawString(10, 12 + (i * 10), menuItems[i]);
+  }
+}
+
+void drawAdjustValue()
+{
+  oled.setFont(ArialMT_Plain_10);
+  oled.setTextAlignment(TEXT_ALIGN_CENTER);
+  oled.drawString(64, 0, menuItems[currentMenu]);
+
+  oled.setFont(ArialMT_Plain_24); // Make the value large and clear
+  oled.drawString(64, 25, String(values[currentMenu], 2) + " m");
+
+  oled.setFont(ArialMT_Plain_10);
+  oled.drawString(64, 52, "Press to Save & Exit");
+}
+
+float getValue(int index)
+{
+  if (index >= 0 && index < ADJUSTABLE_MENU_ITEMS)
+  {
+    return values[index];
+  }
+  return 0.0; // Return a default value if the index is invalid
+}
+
+uint8_t confirmedNbTrials = 4;
+
+/* User application data buffer size */
 
 // char str[] = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nullam elementum neque et dolor finibus condimentum. Pellentesque id leo ac neque ultricies scelerisque. Cras efficitur lacinia diam, eget sed.";
 void prepareValidDistance(unsigned long timeout)
 {
+
   int validDist = -1;
   unsigned long startTime = millis();
   // Wait until valid OR 5 sec timeout
@@ -118,7 +355,7 @@ void prepareValidDistance(unsigned long timeout)
     if (validDist == -1)
     {
       Serial.println("Waiting for valid ultrasonic reading...");
-      delay(200);
+      // delay(200);
     }
   }
 
@@ -132,22 +369,25 @@ void prepareValidDistance(unsigned long timeout)
   {
     Serial.println("No valid reading after timeout, continuing anyway...");
   }
+  Serial.println("Elapsed time (ms): " + String(millis() - startTime));
 }
 // ===== Function to read SR04M-2 =====
-
 
 static void prepareTxFrame(uint8_t port)
 {
 
   StaticJsonDocument<255> sensordataJson;
-  sensordataJson["distance_cm"] = readUltrasonicCM();
+  sensordataJson["dt"] = readUltrasonicCM();
 
-  // sensordataJson["ldr_value"] = analogRead(LDR_PIN);
+  sensordataJson["dr"] = int(values[0] * 100); // Drought threshold
+  sensordataJson["fr"] = int(values[1] * 100); // Flood threshold
+  sensordataJson["td"] = int(values[2] * 100); // Tank depth
+  sensordataJson["sh"] = int(values[3] * 100); // Sensor height
+
+  // float distance = readUltrasonicCM() * 0.01;                 // Convert cm to m // Higher number is less full
 
   char jsonBuffer[255];
   size_t n = serializeJson(sensordataJson, jsonBuffer);
-
-  // Serial.printf("JsonData :%s \n",sensordataJson);
   appDataSize = n;
   Serial.printf("Send : %s", jsonBuffer);
   Serial.printf("Size: %d\n", appDataSize);
@@ -163,26 +403,51 @@ static void prepareTxFrame(uint8_t port)
 void setup()
 {
   Serial.begin(115200);
-  menu_setup(41,48,19);
-  Mcu.begin(HELTEC_BOARD, SLOW_CLK_TPYE);
-  pinMode(Trig_PIN, OUTPUT); // Trig pin will send a pulse
-  pinMode(Echo_PIN, INPUT);  // Echo pin will listen for the return pulse
+
+  pinMode(Trig_PIN, OUTPUT);
+  pinMode(Echo_PIN, INPUT);
+
+  oled.init();
+  oled.clear();
+  oled.display();
+  convertEEPROM();
+  pinMode(1, OUTPUT);
+  pinMode(pinA, INPUT);
+  pinMode(pinB, INPUT);
+  pinMode(sw, INPUT_PULLUP);
+  pinMode(2, OUTPUT); // LED pin
+  pinMode(3, OUTPUT); // LED pin
   prepareValidDistance(30000);
+  pinALast = digitalRead(pinA);
+  oledstate = 0;
+  long startreadbutton = millis();
+  while (millis() - startreadbutton < 10000)
+  {
+    digitalWrite(1, HIGH);
+    if (digitalRead(sw) == LOW)
+    {
+      oledstate = true;
+      digitalWrite(1, LOW);
+      break;
+    }
+  }
+  while (oledstate)
+  {
+    handleInputs();
+
+    // 2. Redraw the screen only if there's a change
+    if (needsRedraw)
+    {
+      updateDisplay();
+    }
+  }
+  Mcu.begin(HELTEC_BOARD, SLOW_CLK_TPYE);
+
+  digitalWrite(1, LOW);
 }
 
 void loop()
 {
-  // float distance = readUltrasonicCM() * 0.01; // Convert cm to m
-  float distance = 6.0 + 4.0 * sin(millis() / 2000.0);
-  float flood_threshold = menu_getValue(FLOOD_THRESHOLD); // Lower number is more full
-  float drought_threshold = menu_getValue(DROUGHT_THRESHOLD); // Higher number is less full
-  String status = "Normal";
-  if (distance < flood_threshold) {
-    status = "Flood";
-  } else if (distance > drought_threshold) {
-    status = "Drought";
-  }
-  menu_loop(distance, status);
   switch (deviceState)
   {
   case DEVICE_STATE_INIT:
@@ -202,8 +467,11 @@ void loop()
   }
   case DEVICE_STATE_SEND:
   {
+
     prepareTxFrame(appPort);
     LoRaWAN.send();
+    digitalWrite(2, HIGH);
+
     deviceState = DEVICE_STATE_CYCLE;
     break;
   }
@@ -217,6 +485,7 @@ void loop()
   }
   case DEVICE_STATE_SLEEP:
   {
+    digitalWrite(2, LOW);
     LoRaWAN.sleep(loraWanClass);
     break;
   }
