@@ -78,7 +78,7 @@ uint32_t appTxDutyCycle = 600000;
 bool overTheAirActivation = true;
 
 // ADR enable/
-bool loraWanAdr = false;
+bool loraWanAdr = true;
 
 /* Indicates if the node is sending confirmed or unconfirmed messages */
 bool isTxConfirmed = true;
@@ -338,7 +338,7 @@ float getValue(int index)
   return 0.0; // Return a default value if the index is invalid
 }
 
-uint8_t confirmedNbTrials = 8;
+uint8_t confirmedNbTrials = 4;
 
 /* User application data buffer size */
 
@@ -457,7 +457,7 @@ void loop()
 #endif
     LoRaWAN.init(loraWanClass, loraWanRegion);
     // both set join DR and DR when ADR off
-    LoRaWAN.setDefaultDR(1);
+    LoRaWAN.setDefaultDR(3);
     break;
   }
   case DEVICE_STATE_JOIN:
