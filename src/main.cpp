@@ -78,7 +78,7 @@ uint32_t appTxDutyCycle = 600000;
 bool overTheAirActivation = true;
 
 // ADR enable/
-bool loraWanAdr = true;
+bool loraWanAdr = false;
 
 /* Indicates if the node is sending confirmed or unconfirmed messages */
 bool isTxConfirmed = true;
@@ -372,11 +372,12 @@ void prepareValidDistance(unsigned long timeout)
   Serial.println("Elapsed time (ms): " + String(millis() - startTime));
 }
 // ===== Function to read SR04M-2 =====
-
+int label = 0;
 static void prepareTxFrame(uint8_t port)
 {
-
+  label++;
   StaticJsonDocument<255> sensordataJson;
+  sensordataJson["id"] = label;
   sensordataJson["dt"] = readUltrasonicCM();
 
   sensordataJson["dr"] = int(values[0] * 100); // Drought threshold
@@ -406,7 +407,7 @@ void setup()
 
   pinMode(Trig_PIN, OUTPUT);
   pinMode(Echo_PIN, INPUT);
-
+  label = 0;  
   oled.init();
   oled.clear();
   oled.display();
