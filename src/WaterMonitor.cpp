@@ -82,7 +82,9 @@ int WaterMonitor::readUltrasonicCM()
         int distance = ultrasonicSensor.readDistance();
         Serial.print("Distance: ");
         Serial.print(distance);
+        return distance;
         measureDelay.repeat();
+
     }
 }
 
