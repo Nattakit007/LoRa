@@ -1,3 +1,10 @@
+
+
+###THIS IS PRE-RELEASE (NOT TEST ON THE REAL-BOARD YET)
+
+
+
+
 # LoRaWAN Water Level Monitor
 
 A water level monitoring system based on the **Heltec WiFi LoRa 32 V3 (ESP32-S3)**.  

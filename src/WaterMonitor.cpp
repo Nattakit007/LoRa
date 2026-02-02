@@ -264,6 +264,28 @@ void WaterMonitor::drawAdjustValue()
     oled->drawString(64, 52, "Press to Save & Exit");
 }
 
+int WaterMonitor::getMeanDistanceCM(const int samples = 5)
+{
+    
+    int totalDistance = 0;
+    int validSamples = 0;
+
+    for (int i = 0; i < samples; i++)
+    {
+        int distance = readUltrasonicCM();
+        if (distance != -1)
+        {
+            totalDistance += distance;
+            validSamples++;
+        }
+        delay(50); // Small delay between samples
+    }
+
+    if (validSamples == 0)
+        return -1; // No valid samples
+
+    return totalDistance / validSamples;
+}
 float WaterMonitor::getDroughtThreshold() { return values[0]; }
 float WaterMonitor::getFloodThreshold() { return values[1]; }
 float WaterMonitor::getTankDepth() { return values[2]; }
