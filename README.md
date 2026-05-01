@@ -54,9 +54,11 @@ Built using **PlatformIO**. Required libraries are managed via `platformio.ini`.
 1. Clone this repository.
 2. Open the project in **VS Code** with the **PlatformIO** extension installed.
 3. **Important Build Fix (ESP32 Core v3.x):**
+4. make sure you make a password.h in the include directory
 
    To prevent `GPIO_PIN_COUNT` compilation errors, ensure your `platformio.ini` contains:
    ```ini
    build_flags =
-       -DGPIO_PIN_COUNT=SOC_GPIO_PIN_COUNT ```    if not working just replace it in the libdep's src
-
+       -DGPIO_PIN_COUNT=SOC_GPIO_PIN_COUNT
+if not working just replace it in the libdep's src
+ 
