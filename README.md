@@ -1,64 +1,55 @@
-# LoRaWAN Water Level Monitor
+<h1 align="center">LoRaWAN Water Level Monitor</h1>
 
-A water level monitoring system based on the **Heltec WiFi LoRa 32 V3 (ESP32-S3)**.  
-This project uses a waterproof ultrasonic sensor to measure water level, displays status and configuration menus on the onboard OLED, and transmits telemetry data via **LoRaWAN (AS923)**.  
-A rotary encoder allows full field configuration without reflashing firmware, making it suitable for lab demonstrations and real-world deployments.
+<h3 align="center">Heltec WiFi LoRa 32 V3 • ESP32-S3 • LoRaWAN AS923 • Ultrasonic Telemetry</h3>
 
----
+<p align="center">
+  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=20&pause=1000&color=2F80ED&center=true&vCenter=true&width=650&lines=LoRaWAN+Water+Level+Telemetry;ESP32-S3+%26+Heltec+V3+Architecture;JSN-SR04T+Ultrasonic+Acquisition;Onboard+OLED+Menu+%26+Field+Tuning" alt="Typing SVG" />[cite: 1]
+</p>
 
-## 🌟 Features
-* **Real-Time Water Level Measurement:** Uses the JSN-SR04T ultrasonic sensor to measure distance and calculate water depth.
-* **OLED Menu Interface:** Built-in screen for live readings, system status, and configuration menus.
-* **Field Configurable (No Reprogramming):** Adjust drought threshold, flood threshold, tank depth, and sensor height using a rotary encoder.
-* **LoRaWAN Telemetry:** Sends JSON-formatted sensor data to TTN or ChirpStack (AS923).
-* **Auto / Setup Boot Logic:** 10-second startup window to enter setup mode or automatically start LoRaWAN transmission.
-* **Non-Volatile Storage:** Configuration values are retained across power cycles.
-
----
-
-## 🛠 Hardware Requirements
-1. **MCU:** Heltec WiFi LoRa 32 V3 (ESP32-S3)
-2. **Sensor:** JSN-SR04T Waterproof Ultrasonic Sensor
-3. **Input:** Rotary Encoder (EC11 or equivalent)
-4. **Display:** Built-in Heltec OLED
-5. **Misc:** Breadboard, jumper wires, power source
+<p align="center">
+  <img src="https://img.shields.io/badge/Platform-ESP32--S3-E7352C?style=for-the-badge&logo=espressif&logoColor=white" />
+  <img src="https://img.shields.io/badge/Hardware-Heltec%20V3-03234B?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/LoRaWAN-AS923-00AEEF?style=for-the-badge&logo=lorawan&logoColor=white" />
+  <img src="https://img.shields.io/badge/IDE-PlatformIO-F38B00?style=for-the-badge&logo=platformio&logoColor=white" />
+</p>
 
 ---
 
-## 🔌 Pin Map
-| Component | Function | ESP32 Pin |
-| :--- | :--- | :--- |
-| **JSN-SR04T** | Trigger | `GPIO 46` |
-| | Echo | `GPIO 45` |
-| **Rotary Encoder** | A (CLK) | `GPIO 36` |
-| | B (DT) | `GPIO 37` |
-| | Switch | `GPIO 38` |
-| **OLED (Heltec)** | SDA | `GPIO 17` |
-| | SCL | `GPIO 18` |
+### Overview
+
+An autonomous, field-configurable water level telemetry system built around the **Heltec WiFi LoRa 32 V3 (ESP32-S3)**. The system measures water depth via a weatherproof ultrasonic sensor, outputs diagnostics to an onboard OLED display, and transmits JSON payloads over **LoRaWAN (AS923)** to The Things Network (TTN) or ChirpStack. Parameter tuning is supported directly in the field via a rotary encoder interface without reflashing firmware.
 
 ---
 
-## 📦 Software Dependencies
-Built using **PlatformIO**. Required libraries are managed via `platformio.ini`.
+### Key Features
 
-* `Heltec ESP32 Dev-Boards`
-* `ESP32_LoRaWAN`
-* `AsyncDelay`
-* `Adafruit GFX`
-* `Adafruit BusIO`
-* `NewPing` (Optional / Alternative)
+* **Acoustic Ranging:** JSN-SR04T waterproof ultrasonic transducer for real-time liquid level measurement.
+* **On-Device UI:** Built-in OLED menu displaying real-time telemetry, signal status, and system settings.
+* **Field Configuration:** Rotary encoder menu allows runtime adjustments to drought/flood limits, tank height, and sensor offsets without code modification.
+* **Non-Volatile Storage (NVS):** Retains runtime calibration values across power cycles.
+* **Dual Boot Logic:** 10-second startup window to enter configuration mode or automatically initiate LoRaWAN uplinks.
+* **Network Interoperability:** Transmits structured JSON payloads over regional AS923 channel plans to TTN or ChirpStack.
 
 ---
 
-## ⚙️ Installation & Build
-1. Clone this repository.
-2. Open the project in **VS Code** with the **PlatformIO** extension installed.
-3. **Important Build Fix (ESP32 Core v3.x):**
-4. make sure you make a password.h in the include directory
+### System Architecture
 
-   To prevent `GPIO_PIN_COUNT` compilation errors, ensure your `platformio.ini` contains:
-   ```ini
-   build_flags =
-       -DGPIO_PIN_COUNT=SOC_GPIO_PIN_COUNT
-if not working just replace it in the libdep's src
- 
+```mermaid
+flowchart LR
+    subgraph Edge [Acquisition & Edge Control]
+        Sensor[JSN-SR04T Ultrasonic] -->|Echo / Trig| MCU[Heltec WiFi LoRa 32 V3<br>ESP32-S3]
+        Encoder[Rotary Encoder EC11] -->|Menu Navigation| MCU
+        MCU -->|Live Metrics / UI| OLED[Onboard OLED Display]
+    end
+
+    subgraph RF [LoRaWAN Telemetry]
+        MCU -->|AS923 Uplink| Gateway[LoRaWAN Gateway]
+        Gateway --> LNS[Network Server<br>TTN / ChirpStack]
+    end
+
+    style MCU stroke:#2F80ED,stroke-width:2px
+    style Sensor stroke:#2F80ED,stroke-width:2px
+    style Encoder stroke:#2F80ED,stroke-width:2px
+    style OLED stroke:#2F80ED,stroke-width:2px
+    style Gateway stroke:#2F80ED,stroke-width:2px
+    style LNS stroke:#2F80ED,stroke-width:2px
